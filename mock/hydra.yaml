@@ -1,0 +1,25 @@
+dsn: memory
+
+log:
+  # allow showing the full request details including sensitive values for testing
+  leak_sensitive_values: true
+
+serve:
+  public:
+    host: localhost
+    port: 4444
+
+  admin:
+    host: localhost
+    port: 4445
+
+urls:
+  self:
+    issuer: http://localhost:4444/
+  login: http://localhost:4446/login
+  consent: http://localhost:4446/consent
+
+webfinger:
+  oidc_discovery:
+    supported_claims:
+      - group
