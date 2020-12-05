@@ -1,0 +1,9 @@
+dsn: memory
+
+log:
+  # allow showing the full request details including sensitive values for testing
+  leak_sensitive_values: true
+
+urls:
+  login: http://localhost:4446/app/login
+  consent: http://localhost:4446/app/consent
