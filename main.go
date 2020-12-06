@@ -1,7 +1,7 @@
 package main
 
 import (
-	"oidcdebug/cmd"
+	"github.com/chilversc/oidc-debug/cmd"
 )
 
 func main() {
