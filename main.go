@@ -47,11 +47,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	showProvider(provider)
 	endpoint := provider.Endpoint()
-
-	fmt.Println("Resolved provider endpoint")
-	fmt.Printf("  AuthURL:   %s\n", endpoint.AuthURL)
-	fmt.Printf("  TokenURL:  %s\n", endpoint.TokenURL)
 
 	// Configure an OpenID Connect aware OAuth2 client.
 	oauth2Config := &oauth2.Config{
@@ -138,6 +135,32 @@ func main() {
 	}
 }
 
+func showProvider(provider *oidc.Provider) {
+	endpoint := provider.Endpoint()
+
+	fmt.Println("Resolved provider endpoint")
+	fmt.Printf("  AuthURL:   %s\n", endpoint.AuthURL)
+	fmt.Printf("  TokenURL:  %s\n", endpoint.TokenURL)
+
+	claims, err := fetchClaimsAsJSON(provider)
+	if err != nil {
+		fmt.Printf("Error getting claims from provider: %v", err)
+	} else {
+		fmt.Println("Claims supported by provider")
+		fmt.Println(claims)
+	}
+}
+
+func fetchClaimsAsJSON(provider *oidc.Provider) (string, error) {
+	var data json.RawMessage
+	err := provider.Claims(&data)
+	if err != nil {
+		return "", err
+	}
+
+	return pp(data, "  ")
+}
+
 func showCode(ctx context.Context, oauth2Config *oauth2.Config, code string) {
 	fmt.Println("Exchanging code for token")
 	token, err := oauth2Config.Exchange(ctx, code)
@@ -187,11 +210,22 @@ func decode(payload string) (string, error) {
 		return "", err
 	}
 
+	return pp(decoded, "  ")
+}
+
+func pp(data []byte, prefix string) (string, error) {
 	var buf bytes.Buffer
-	err = json.Indent(&buf, decoded, "", "  ")
+
+	// json.Indent does not include the prefix before the first line
+	_, err := buf.WriteString(prefix)
 	if err != nil {
 		return "", err
 	}
 
-	return string(buf.Bytes()), nil
+	err = json.Indent(&buf, data, prefix, "  ")
+	if err != nil {
+		return "", err
+	}
+
+	return buf.String(), nil
 }
