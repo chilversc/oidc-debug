@@ -3,61 +3,64 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-oidc"
 	"github.com/pkg/browser"
 	"golang.org/x/oauth2"
 )
 
-func main() {
-	// dialer := &net.Dialer{
-	// 	Timeout:   30 * time.Second,
-	// 	KeepAlive: 30 * time.Second,
-	// 	DualStack: true,
-	// }
-	// transport := &http.Transport{
-	// 	Proxy: http.ProxyFromEnvironment,
-	// 	DialContext: dialer.DialContext,
-	// 	ForceAttemptHTTP2:     true,
-	// 	MaxIdleConns:          100,
-	// 	IdleConnTimeout:       90 * time.Second,
-	// 	TLSHandshakeTimeout:   10 * time.Second,
-	// 	ExpectContinueTimeout: 1 * time.Second,
-	// 	TLSClientConfig: &tls.Config{
-	// 		InsecureSkipVerify: true,
-	// 	},
-	// }
-	// client := &http.Client{
-	// 	Transport: transport,
-	// }
-	// transport := http.DefaultTransport
-	client := http.DefaultClient
+type Config struct {
+	IssuerURL string
+	Insecure  bool
 
+	ClientID     string
+	ClientSecret string
+	ClientPort   int
+}
+
+func main() {
+	cfg := Config{
+		IssuerURL: "http://localhost:4444/",
+	}
+
+	if cfg.ClientPort < 1 {
+		cfg.ClientPort = 4447
+	}
+	clientURL := url.URL{
+		Scheme: "http",
+		Host:   fmt.Sprintf("localhost:%d", cfg.ClientPort),
+		Path:   "/",
+	}
+
+	client := client(cfg)
 	ctx := oidc.ClientContext(context.Background(), client)
-	provider, err := oidc.NewProvider(ctx, "http://localhost:4444/")
+	provider, err := oidc.NewProvider(ctx, cfg.IssuerURL)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
 
 	showProvider(provider)
-	endpoint := provider.Endpoint()
 
 	// Configure an OpenID Connect aware OAuth2 client.
 	oauth2Config := &oauth2.Config{
 		ClientID:     "test",
 		ClientSecret: "123456",
-		RedirectURL:  "http://localhost:4447/callback",
+		RedirectURL:  clientURL.ResolveReference(&url.URL{Path: "callback"}).String(),
 
 		// Discovery returns the OAuth2 endpoints.
-		Endpoint: endpoint,
+		Endpoint: provider.Endpoint(),
 
 		// "openid" is a required scope for OpenID Connect flows.
 		Scopes: []string{oidc.ScopeOpenID},
@@ -65,7 +68,7 @@ func main() {
 
 	done := make(chan error, 1)
 
-	http.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("Received %s %s\n", r.Method, r.URL.Path)
 
 		switch r.Method {
@@ -115,14 +118,14 @@ func main() {
 	})
 
 	go func() {
-		err := http.ListenAndServe("localhost:4447", nil)
+		err := http.ListenAndServe(clientURL.Host, nil)
 		if err != nil && done != nil {
 			done <- err
 		}
 		close(done)
 	}()
 
-	err = browser.OpenURL("http://localhost:4447/test")
+	err = browser.OpenURL(clientURL.ResolveReference(&url.URL{Path: "login"}).String())
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -132,6 +135,31 @@ func main() {
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
+	}
+}
+
+func client(cfg Config) *http.Client {
+	dialer := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+		DualStack: true,
+	}
+
+	transport := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           dialer.DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: cfg.Insecure,
+		},
+	}
+
+	return &http.Client{
+		Transport: transport,
 	}
 }
 

@@ -1,10 +1,16 @@
 package main
 
 import (
+	"crypto/tls"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"time"
 
+	"github.com/go-openapi/runtime"
+	httptransport "github.com/go-openapi/runtime/client"
 	hydra "github.com/ory/hydra-client-go/client"
 	"github.com/ory/hydra-client-go/client/admin"
 	"github.com/ory/hydra-client-go/models"
@@ -15,25 +21,56 @@ var client *hydra.OryHydra
 var logger = log.New(os.Stderr)
 
 func main() {
-	hydraAdminHost := "localhost:4445"
 	host := "localhost:4446"
+	hydraURL, err := url.Parse("http://localhost:4445/")
+	if err != nil {
+		fmt.Printf("Error parsing URL: %v", err)
+	}
 
-	client = hydra.NewHTTPClientWithConfig(nil, &hydra.TransportConfig{
-		Schemes:  []string{"http"},
-		Host:     hydraAdminHost,
-		BasePath: "/",
-	})
+	transport := transport(hydraURL)
+	client = hydra.New(transport, nil)
 
 	http.HandleFunc("/login", handleLogin)
 	http.HandleFunc("/consent", handleConsent)
 
 	logger.Infof("Starting HTTP server on %s to handle hydra authentication requests", host)
-	err := http.ListenAndServe(host, nil)
+	err = http.ListenAndServe(host, nil)
 
 	if err != nil {
 		logger.Fatalf("failed to start http server: %v", err)
 		os.Exit(1)
 	}
+}
+
+func transport(hydraURL *url.URL) runtime.ClientTransport {
+	dialer := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+		DualStack: true,
+	}
+
+	transport := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           dialer.DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+	}
+
+	client := &http.Client{
+		Transport: transport,
+	}
+
+	return httptransport.NewWithClient(
+		hydraURL.Host,
+		hydraURL.Path,
+		[]string{hydraURL.Scheme},
+		client)
 }
 
 func handleLogin(w http.ResponseWriter, r *http.Request) {
