@@ -54,7 +54,7 @@ func (v *multivalue) UnmarshalYAML(n *yaml.Node) error {
 	return n.Decode((*[]string)(v))
 }
 
-type testConfig struct {
+type TestConfig struct {
 	IssuerURL string `yaml:"issuerURL"`
 	Insecure  bool   `yaml:"insecure"`
 
@@ -64,9 +64,11 @@ type testConfig struct {
 	ClientID     string `yaml:"clientID"`
 	ClientSecret string `yaml:"clientSecret"`
 	ClientPort   int    `yaml:"clientPort"`
+
+	OpenURL func(url string) error
 }
 
-func (cfg *testConfig) validate() error {
+func (cfg *TestConfig) validate() error {
 	err := make([]string, 0, 3)
 
 	if cfg.IssuerURL == "" {
@@ -119,7 +121,11 @@ func test(cmd *cobra.Command, args []string) {
 	}
 	fmt.Println(str)
 
-	err = cfg.validate()
+	Test(cfg)
+}
+
+func Test(cfg TestConfig) {
+	err := cfg.validate()
 	if err != nil {
 		fmt.Println("Configuration errors:")
 		fmt.Println(err)
@@ -136,8 +142,8 @@ func test(cmd *cobra.Command, args []string) {
 	ctx := oidc.ClientContext(context.Background(), client)
 	provider, err := oidc.NewProvider(ctx, cfg.IssuerURL)
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		fmt.Printf("Error fetching provider: %v", err)
+		return
 	}
 
 	showProvider(provider)
@@ -198,9 +204,11 @@ func test(cmd *cobra.Command, args []string) {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("done"))
 
+			// Need to improve this handling, race condition between sending
+			// the response to the browser and the app terminating.
+			// Also could cause the ListenAndServe routine to panic if it
+			// terminates with an error.
 			close(done)
-			done = nil
-
 		default:
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		}
@@ -208,27 +216,36 @@ func test(cmd *cobra.Command, args []string) {
 
 	go func() {
 		err := http.ListenAndServe(clientURL.Host, nil)
-		if err != nil && done != nil {
+		if err != nil {
 			done <- err
 		}
+		// currently this routine only terminates if there's an error
+		// from ListenAndServe
 		close(done)
 	}()
 
-	err = browser.OpenURL(clientURL.ResolveReference(&url.URL{Path: "login"}).String())
+	loginURL := clientURL.ResolveReference(&url.URL{Path: "login"}).String()
+	if cfg.OpenURL == nil {
+		err = browser.OpenURL(loginURL)
+	} else {
+		err = cfg.OpenURL(loginURL)
+	}
+
 	if err != nil {
+		fmt.Println("Error opening URL")
 		fmt.Println(err)
-		os.Exit(1)
+		return
 	}
 
 	err = <-done
 	if err != nil {
 		fmt.Println(err)
-		os.Exit(1)
+		return
 	}
 }
 
-func loadConfig(path string) (testConfig, error) {
-	cfg := testConfig{
+func loadConfig(path string) (TestConfig, error) {
+	cfg := TestConfig{
 		ClientPort: 4447,
 	}
 
@@ -242,7 +259,7 @@ func loadConfig(path string) (testConfig, error) {
 	return cfg, err
 }
 
-func client(cfg testConfig) *http.Client {
+func client(cfg TestConfig) *http.Client {
 	dialer := &net.Dialer{
 		Timeout:   30 * time.Second,
 		KeepAlive: 30 * time.Second,
