@@ -1,0 +1,15 @@
+issuerURL: http://localhost:4444/
+insecure: true
+clientID: test
+clientSecret: 123456
+clientPort: 4447
+scopes:
+  - openid
+  - email
+extraParams:
+  resource: allatclaims
+  multivalued:
+    - a
+    - b
+  novalue:
+caPath: not\yet\supported.crt
